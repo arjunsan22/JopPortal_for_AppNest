@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Application from '../models/Application.js';
 import path from 'path';
 import fs from 'fs';
@@ -68,6 +69,43 @@ export const getAllApplications = asyncHandler(async (req, res) => {
         .status(200)
         .json(new ApiResponse(200, paginatedResponse, 'Applications fetched successfully'));
 });
+
+
+export const getAppliedJobs = asyncHandler(async (req, res) => {
+    const { page, limit, skip } = getPaginationOptions(req);
+    const { phone, search } = req.query;
+
+    if (!phone) {
+        throw new ApiError(400, 'Phone number is required');
+    }
+
+    const filter = { phone };
+
+    if (search) {
+        const Job = mongoose.model('Job');
+        const matchingJobs = await Job.find({
+            title: { $regex: search, $options: 'i' }
+        }).select('_id');
+        
+        const jobIds = matchingJobs.map(job => job._id);
+        filter.jobId = { $in: jobIds };
+    }
+
+    const totalDocuments = await Application.countDocuments(filter);
+
+    const applications = await Application.find(filter)
+        .populate('jobId', 'title company location')
+        .sort({ appliedDate: -1 })
+        .skip(skip)
+        .limit(limit);
+
+    const paginatedResponse = createPaginatedResponse(applications, totalDocuments, page, limit);
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, paginatedResponse, 'Applied jobs fetched successfully'));
+});
+
 
 
 export const updateApplicationStatus = asyncHandler(async (req, res) => {

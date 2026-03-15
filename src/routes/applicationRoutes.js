@@ -1,11 +1,13 @@
 import express from 'express';
-import { submitApplication, getAllApplications, updateApplicationStatus, getDashboardStats, downloadResume } from '../controllers/applicationController.js';
+import { submitApplication, getAllApplications, updateApplicationStatus, getDashboardStats, downloadResume, getAppliedJobs } from '../controllers/applicationController.js';
 import upload from '../middleware/multer.middleware.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 router.post('/apply', upload.single('resume'), submitApplication);
+
+router.get('/applied', getAppliedJobs);
 
 router.get('/stats', protect, admin, getDashboardStats);
 
