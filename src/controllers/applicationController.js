@@ -69,3 +69,37 @@ export const updateApplicationStatus = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
+export const getDashboardStats = async (req, res) => {
+    try {
+        const total = await Application.countDocuments();
+        const pending = await Application.countDocuments({ status: 'pending' });
+        const selected = await Application.countDocuments({ status: 'selected' });
+        const rejected = await Application.countDocuments({ status: 'rejected' });
+
+        const recentApplications = await Application.find()
+            .sort({ updatedAt: -1 })
+            .limit(5);
+
+        const recentActivity = recentApplications.map(app => {
+            const isNew = app.createdAt.getTime() === app.updatedAt.getTime();
+            return {
+                id: app._id,
+                action: isNew 
+                    ? `New application received from ${app.applicantName}` 
+                    : `${app.applicantName} - Status updated to ${app.status.charAt(0).toUpperCase() + app.status.slice(1)}`,
+                time: app.updatedAt,
+                type: isNew ? 'new' : 'update'
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            stats: { total, pending, selected, rejected },
+            recentActivity
+        });
+    } catch (error) {
+        console.error('Fetching Dashboard Stats Error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
