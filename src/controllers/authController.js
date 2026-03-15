@@ -1,108 +1,91 @@
-import bcrypt from 'bcrypt'
-import User from '../models/User.js'
-import jwt from 'jsonwebtoken'
-
-export const login = async (req, res) => {
-    try {
-        const { email, password } = req.body;
-
-        if (!email || !password) {
-            return res.status(400).json({ success: false, message: 'Email and password are required' });
-        }
-
-        const user = await User.findOne({ email });
-
-        if (!user) {
-            return res.status(401).json({ success: false, message: 'Invalid credentials' });
-        }
+import User from '../models/User.js';
+import jwt from 'jsonwebtoken';
+import { ApiError } from '../utils/ApiError.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 
+export const login = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
 
-        const accessToken = jwt.sign(
-            { id: user._id, role: user.role },
-            process.env.ACCESS_TOKEN_SECRET || 'fallback_access_secret',
-            { expiresIn: '15m' }
-        );
-
-
-        const refreshToken = jwt.sign(
-            { id: user._id },
-            process.env.REFRESH_TOKEN_SECRET || 'fallback_refresh_secret',
-            { expiresIn: '7d' }
-        );
-
-        res.cookie('accessToken', accessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: 15 * 60 * 1000 // 15 minutes
-        });
-
-        res.cookie('refreshToken', refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
-
-        res.json({
-            success: true,
-            message: 'Logged in successfully',
-            user: {
-                id: user._id,
-                email: user.email,
-                role: user.role
-            }
-        });
-
-    } catch (error) {
-        console.error('login error:', error);
-        res.status(500).json({ success: false, message: 'Internal server error' });
+    if (!email || !password) {
+        throw new ApiError(400, 'Email and password are required');
     }
-};
 
-export const logout = async (req, res) => {
-    try {
-        res.clearCookie('accessToken');
-        res.clearCookie('refreshToken');
-        res.json({ success: true, message: 'logout successfully' });
-    } catch (error) {
-        console.error('logout error', error);
-        res.status(500).json({ success: false, message: error.message });
+    const user = await User.findOne({ email });
+
+    if (!user) {
+        throw new ApiError(401, 'Invalid credentials');
     }
-};
 
-export const refresh = async (req, res) => {
-    try {
-        const refreshToken = req.cookies.refreshToken;
 
-        if (!refreshToken) {
-            return res.status(401).json({ success: false, message: 'Refresh token not found' });
-        }
 
-        jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || 'fallback_refresh_secret', (err, decoded) => {
-            if (err) {
-                return res.status(403).json({ success: false, message: 'Invalid refresh token' });
-            }
+    const accessToken = jwt.sign(
+        { id: user._id, role: user.role },
+        process.env.ACCESS_TOKEN_SECRET || 'fallback_access_secret',
+        { expiresIn: '15m' }
+    );
 
-            const accessToken = jwt.sign(
-                { id: decoded.id, role: 'admin' },
-                process.env.ACCESS_TOKEN_SECRET || 'fallback_access_secret',
-                { expiresIn: '15m' }
-            );
+    const refreshToken = jwt.sign(
+        { id: user._id },
+        process.env.REFRESH_TOKEN_SECRET || 'fallback_refresh_secret',
+        { expiresIn: '7d' }
+    );
 
-            res.cookie('accessToken', accessToken, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'lax',
-                maxAge: 15 * 60 * 1000
-            });
+    res.cookie('accessToken', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 15 * 60 * 1000, // 15 minutes
+    });
 
-            res.json({ success: true, message: 'Token refreshed successfully' });
-        });
+    res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
 
-    } catch (error) {
-        console.error('refresh error', error);
-        res.status(500).json({ success: false, message: 'Internal server error' });
+    return res.status(200).json(
+        new ApiResponse(200, { id: user._id, email: user.email, role: user.role }, 'Logged in successfully')
+    );
+});
+
+
+export const logout = asyncHandler(async (req, res) => {
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+
+    return res.status(200).json(new ApiResponse(200, {}, 'Logged out successfully'));
+});
+
+
+export const refresh = asyncHandler(async (req, res) => {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!refreshToken) {
+        throw new ApiError(401, 'Refresh token not found, please login again');
     }
-};
+
+    let decoded;
+    try {
+        decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || 'fallback_refresh_secret');
+    } catch (err) {
+        throw new ApiError(403, 'Invalid or expired refresh token, please login again');
+    }
+
+    const accessToken = jwt.sign(
+        { id: decoded.id, role: 'admin' },
+        process.env.ACCESS_TOKEN_SECRET || 'fallback_access_secret',
+        { expiresIn: '15m' }
+    );
+
+    res.cookie('accessToken', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 15 * 60 * 1000,
+    });
+
+    return res.status(200).json(new ApiResponse(200, {}, 'Access token refreshed successfully'));
+});

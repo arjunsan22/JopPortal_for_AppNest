@@ -1,105 +1,141 @@
 import Application from '../models/Application.js';
+import path from 'path';
+import fs from 'fs';
+import { getPaginationOptions, createPaginatedResponse } from '../utils/pagination.js';
+import { ApiError } from '../utils/ApiError.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
-export const submitApplication = async (req, res) => {
-    try {
-        const { jobId, name, email, phone, experience, currentCtc, expectedCtc, workMode } = req.body;
-        
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: 'Resume is required' });
+
+export const submitApplication = asyncHandler(async (req, res) => {
+    const { jobId, name, email, phone, experience, currentCtc, expectedCtc, workMode } = req.body;
+
+    if (!req.file) {
+        throw new ApiError(400, 'Resume (PDF) is required');
+    }
+
+
+    const resumeFilename = req.file.filename;
+
+    const application = await Application.create({
+        jobId,
+        applicantName: name,
+        email,
+        phone,
+        experience,
+        currentCtc,
+        expectedCtc,
+        workMode,
+        resume: resumeFilename,
+    });
+
+    return res
+        .status(201)
+        .json(new ApiResponse(201, { applicationId: application._id }, 'Application submitted successfully'));
+});
+
+
+export const getAllApplications = asyncHandler(async (req, res) => {
+    const { page, limit, skip } = getPaginationOptions(req);
+    const { search, status } = req.query;
+
+    const filter = {};
+
+    if (status && status !== 'all') {
+        filter.status = status;
+    }
+
+    if (search) {
+        filter.$or = [
+            { applicantName: { $regex: search, $options: 'i' } },
+            { email: { $regex: search, $options: 'i' } },
+
+        ];
+    }
+
+    const totalDocuments = await Application.countDocuments(filter);
+
+    const applications = await Application.find(filter)
+        .populate('jobId', 'title')
+        .sort({ appliedDate: -1 })
+        .skip(skip)
+        .limit(limit);
+
+
+    const paginatedResponse = createPaginatedResponse(applications, totalDocuments, page, limit);
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, paginatedResponse, 'Applications fetched successfully'));
+});
+
+
+export const updateApplicationStatus = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ['pending', 'selected', 'rejected'];
+
+    if (!validStatuses.includes(status)) {
+        throw new ApiError(400, `Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+    }
+
+    const application = await Application.findByIdAndUpdate(
+        id,
+        { status },
+        { new: true, runValidators: true }
+    );
+
+    if (!application) {
+        throw new ApiError(404, 'Application not found');
+    }
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, { application }, 'Application status updated successfully'));
+});
+
+
+export const getDashboardStats = asyncHandler(async (req, res) => {
+    const [total, pending, selected, rejected, recentApplications] = await Promise.all([
+        Application.countDocuments(),
+        Application.countDocuments({ status: 'pending' }),
+        Application.countDocuments({ status: 'selected' }),
+        Application.countDocuments({ status: 'rejected' }),
+        Application.find().sort({ updatedAt: -1 }).limit(5),
+    ]);
+
+    const recentActivity = recentApplications.map((app) => {
+        const isNew = app.createdAt.getTime() === app.updatedAt.getTime();
+        return {
+            id: app._id,
+            action: isNew
+                ? `New application received from ${app.applicantName}`
+                : `${app.applicantName} - Status updated to ${app.status.charAt(0).toUpperCase() + app.status.slice(1)}`,
+            time: app.updatedAt,
+            type: isNew ? 'new' : 'update',
+        };
+    });
+
+    return res.status(200).json(
+        new ApiResponse(200, { stats: { total, pending, selected, rejected }, recentActivity }, 'Dashboard stats fetched successfully')
+    );
+});
+
+export const downloadResume = asyncHandler(async (req, res) => {
+    const { filename } = req.params;
+
+    const sanitizedFilename = path.basename(filename);
+
+    const filePath = path.resolve('temp', 'uploads', sanitizedFilename);
+
+    if (!fs.existsSync(filePath)) {
+        throw new ApiError(404, 'Resume file not found');
+    }
+
+    res.download(filePath, sanitizedFilename, (err) => {
+        if (err) {
+            console.error("Error downloading file", err);
         }
-        
-        const resumePath = `/public/resumes/${req.file.filename}`;
-        
-        const application = await Application.create({
-            jobId,
-            applicantName: name, 
-            email,
-            phone,
-            experience,
-            currentCtc,
-            expectedCtc,
-            workMode,
-            resume: resumePath
-        });
-        
-        res.status(201).json({ success: true, message: 'Application submitted successfully', application });
-    } catch (error) {
-        console.error('Application Error:', error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-export const getAllApplications = async (req, res) => {
-    try {
-        const applications = await Application.find()
-            .populate('jobId', 'title') // Populate the related Job title
-            .sort({ appliedDate: -1 });
-
-        res.status(200).json({ success: true, applications });
-    } catch (error) {
-        console.error('Fetching Applications Error:', error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-export const updateApplicationStatus = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status } = req.body;
-        
-        const validStatuses = ['pending', 'selected', 'rejected'];
-        
-        if (!validStatuses.includes(status)) {
-            return res.status(400).json({ success: false, message: 'Invalid status type' });
-        }
-        
-        const application = await Application.findByIdAndUpdate(
-            id,
-            { status },
-            { new: true, runValidators: true }
-        );
-        
-        if (!application) {
-            return res.status(404).json({ success: false, message: 'Application not found' });
-        }
-        
-        res.status(200).json({ success: true, message: 'Status updated successfully', application });
-    } catch (error) {
-        console.error('Status Update Error:', error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-export const getDashboardStats = async (req, res) => {
-    try {
-        const total = await Application.countDocuments();
-        const pending = await Application.countDocuments({ status: 'pending' });
-        const selected = await Application.countDocuments({ status: 'selected' });
-        const rejected = await Application.countDocuments({ status: 'rejected' });
-
-        const recentApplications = await Application.find()
-            .sort({ updatedAt: -1 })
-            .limit(5);
-
-        const recentActivity = recentApplications.map(app => {
-            const isNew = app.createdAt.getTime() === app.updatedAt.getTime();
-            return {
-                id: app._id,
-                action: isNew 
-                    ? `New application received from ${app.applicantName}` 
-                    : `${app.applicantName} - Status updated to ${app.status.charAt(0).toUpperCase() + app.status.slice(1)}`,
-                time: app.updatedAt,
-                type: isNew ? 'new' : 'update'
-            };
-        });
-
-        res.status(200).json({
-            success: true,
-            stats: { total, pending, selected, rejected },
-            recentActivity
-        });
-    } catch (error) {
-        console.error('Fetching Dashboard Stats Error:', error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+    });
+});
