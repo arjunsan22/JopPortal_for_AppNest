@@ -60,32 +60,3 @@ export const logout = asyncHandler(async (req, res) => {
 });
 
 
-export const refresh = asyncHandler(async (req, res) => {
-    const refreshToken = req.cookies.refreshToken;
-
-    if (!refreshToken) {
-        throw new ApiError(401, 'Refresh token not found, please login again');
-    }
-
-    let decoded;
-    try {
-        decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || 'fallback_refresh_secret');
-    } catch (err) {
-        throw new ApiError(403, 'Invalid or expired refresh token, please login again');
-    }
-
-    const accessToken = jwt.sign(
-        { id: decoded.id, role: 'admin' },
-        process.env.ACCESS_TOKEN_SECRET || 'fallback_access_secret',
-        { expiresIn: '15m' }
-    );
-
-    res.cookie('accessToken', accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 15 * 60 * 1000,
-    });
-
-    return res.status(200).json(new ApiResponse(200, {}, 'Access token refreshed successfully'));
-});
