@@ -11,8 +11,10 @@ export const login = asyncHandler(async (req, res) => {
     if (!email || !password) {
         throw new ApiError(400, 'Email and password are required');
     }
+    //password checking
 
-    const user = await User.findOne({ email });
+
+    const user = await User.findOne({ email, password });
 
     if (!user) {
         throw new ApiError(401, 'Invalid credentials');
