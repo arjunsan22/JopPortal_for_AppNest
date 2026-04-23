@@ -45,7 +45,7 @@ export const protect = async (req, res, next) => {
             res.cookie('accessToken', newAccessToken, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
-                sameSite: 'lax', // Must match login setup
+                sameSite: 'none', // Must be 'none' for cross-domain Vercel -> Render support
                 maxAge: 15 * 60 * 1000 // 15 minutes
             });
 
